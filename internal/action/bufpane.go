@@ -169,6 +169,10 @@ func BufMapEvent(k Event, action string) {
 			// if the action changed the current pane, update the reference
 			h = MainTab().CurPane()
 			success = innerSuccess
+			if h == nil {
+				// stop, in case the current pane is not a BufPane
+				break
+			}
 		}
 		return true
 	}
@@ -496,11 +500,16 @@ func (h *BufPane) HandleEvent(event tcell.Event) {
 			// Mouse event with no click - mouse was just released.
 			// If there were multiple mouse buttons pressed, we don't know which one
 			// was actually released, so we assume they all were released.
+			pressed := len(h.mousePressed) > 0
 			for me := range h.mousePressed {
 				delete(h.mousePressed, me)
 
 				me.state = MouseRelease
 				h.DoMouseEvent(me, e)
+			}
+			if !pressed {
+				// Propagate the mouse release in case the press wasn't for this BufPane
+				Tabs.ResetMouse()
 			}
 		}
 	}
