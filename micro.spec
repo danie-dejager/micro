@@ -33,7 +33,7 @@ make build VERSION=%{version} HASH=%{shortcommit}
 
 %install
 rm -rf $RPM_BUILD_ROOT
-install -m 0755 -vd                %{buildroot}%{_bindir}
+install -m 0755 -vd              %{buildroot}%{_bindir}
 install -m 0755 -vp micro 		     %{buildroot}%{_bindir}/
 
 %check
