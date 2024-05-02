@@ -1,6 +1,6 @@
 Name:           micro
 Version:        2.0.13
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        A modern and intuitive terminal-based text editor
 
 License:        MIT and ASL 2.0
