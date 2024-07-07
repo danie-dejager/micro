@@ -469,11 +469,7 @@ func (h *BufPane) HandleEvent(event tcell.Event) {
 		h.paste(e.Text())
 		h.Relocate()
 	case *tcell.EventKey:
-		ke := KeyEvent{
-			code: e.Key(),
-			mod:  metaToAlt(e.Modifiers()),
-			r:    e.Rune(),
-		}
+		ke := keyEvent(e)
 
 		done := h.DoKeyEvent(ke)
 		if !done && e.Key() == tcell.KeyRune {
@@ -746,10 +742,16 @@ var BufKeyActions = map[string]BufKeyAction{
 	"SelectRight":               (*BufPane).SelectRight,
 	"WordRight":                 (*BufPane).WordRight,
 	"WordLeft":                  (*BufPane).WordLeft,
+	"SubWordRight":              (*BufPane).SubWordRight,
+	"SubWordLeft":               (*BufPane).SubWordLeft,
 	"SelectWordRight":           (*BufPane).SelectWordRight,
 	"SelectWordLeft":            (*BufPane).SelectWordLeft,
+	"SelectSubWordRight":        (*BufPane).SelectSubWordRight,
+	"SelectSubWordLeft":         (*BufPane).SelectSubWordLeft,
 	"DeleteWordRight":           (*BufPane).DeleteWordRight,
 	"DeleteWordLeft":            (*BufPane).DeleteWordLeft,
+	"DeleteSubWordRight":        (*BufPane).DeleteSubWordRight,
+	"DeleteSubWordLeft":         (*BufPane).DeleteSubWordLeft,
 	"SelectLine":                (*BufPane).SelectLine,
 	"SelectToStartOfLine":       (*BufPane).SelectToStartOfLine,
 	"SelectToStartOfText":       (*BufPane).SelectToStartOfText,
@@ -876,10 +878,16 @@ var MultiActions = map[string]bool{
 	"SelectRight":               true,
 	"WordRight":                 true,
 	"WordLeft":                  true,
+	"SubWordRight":              true,
+	"SubWordLeft":               true,
 	"SelectWordRight":           true,
 	"SelectWordLeft":            true,
+	"SelectSubWordRight":        true,
+	"SelectSubWordLeft":         true,
 	"DeleteWordRight":           true,
 	"DeleteWordLeft":            true,
+	"DeleteSubWordRight":        true,
+	"DeleteSubWordLeft":         true,
 	"SelectLine":                true,
 	"SelectToStartOfLine":       true,
 	"SelectToStartOfText":       true,
