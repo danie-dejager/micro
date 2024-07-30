@@ -237,11 +237,14 @@ StartOfText
 StartOfTextToggle
 ParagraphPrevious
 ParagraphNext
+SelectToParagraphPrevious
+SelectToParagraphNext
 ToggleHelp
 ToggleDiffGutter
 ToggleRuler
 JumpLine
 ResetSearch
+ClearInfo
 ClearStatus
 ShellMode
 CommandMode
