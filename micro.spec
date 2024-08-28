@@ -1,6 +1,6 @@
 Name:           micro
-Version:        2.0.13
-Release:        3%{?dist}
+Version:        2.0.14
+Release:        1%{?dist}
 Summary:        A modern and intuitive terminal-based text editor
 
 License:        MIT and ASL 2.0
@@ -14,9 +14,9 @@ BuildRequires:  git
 
 Provides:       %{name} = %{version}
 
-%global debug_package %{nil}
-%global compiledate     January\ 28,\ 2024
-%global shortcommit     68d88b5
+%global debug_package   %{nil}
+%global compiledate     August\ 28,\ 2024
+%global shortcommit     04c5770
 
 %description
 micro is a terminal-based text editor that aims to be easy to use and intuitive, while also taking advantage of the capabilities of modern terminals. It comes as a single, batteries-included, static binary with no dependencies; you can download and use it right now!
@@ -44,7 +44,8 @@ install -m 0755 -vp micro 		     %{buildroot}%{_bindir}/
 %{_bindir}/*
  
 %changelog
-* Sun Jan 28 2024 Danie de Jager - 2.0.13-2
+* Wed Aug 28 2024 - Danie de Jager - 2.0.14-1
+* Sun Jan 28 2024 - Danie de Jager - 2.0.13-2
 - Fixed version and commit hash output.
-* Sat Jan 27 2024 Danie de Jager - 2.0.13-1
+* Sat Jan 27 2024 - Danie de Jager - 2.0.13-1
 - SPEC to build on AL2023.
