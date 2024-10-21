@@ -170,10 +170,10 @@ func (h *BufPane) MoveCursorUp(n int) {
 		if sloc == vloc.SLoc {
 			// we are at the beginning of buffer
 			h.Cursor.Loc = h.Buf.Start()
-			h.Cursor.LastVisualX = 0
+			h.Cursor.StoreVisualX()
 		} else {
 			vloc.SLoc = sloc
-			vloc.VisualX = h.Cursor.LastVisualX
+			vloc.VisualX = h.Cursor.LastWrappedVisualX
 			h.Cursor.Loc = h.LocFromVLoc(vloc)
 		}
 	}
@@ -189,11 +189,10 @@ func (h *BufPane) MoveCursorDown(n int) {
 		if sloc == vloc.SLoc {
 			// we are at the end of buffer
 			h.Cursor.Loc = h.Buf.End()
-			vloc = h.VLocFromLoc(h.Cursor.Loc)
-			h.Cursor.LastVisualX = vloc.VisualX
+			h.Cursor.StoreVisualX()
 		} else {
 			vloc.SLoc = sloc
-			vloc.VisualX = h.Cursor.LastVisualX
+			vloc.VisualX = h.Cursor.LastWrappedVisualX
 			h.Cursor.Loc = h.LocFromVLoc(vloc)
 		}
 	}
@@ -657,7 +656,7 @@ func (h *BufPane) InsertNewline() bool {
 			h.Buf.Remove(buffer.Loc{X: 0, Y: h.Cursor.Y - 1}, buffer.Loc{X: util.CharacterCount(line), Y: h.Cursor.Y - 1})
 		}
 	}
-	h.Cursor.LastVisualX = h.Cursor.GetVisualX()
+	h.Cursor.StoreVisualX()
 	h.Relocate()
 	return true
 }
@@ -687,7 +686,7 @@ func (h *BufPane) Backspace() bool {
 			h.Buf.Remove(loc.Move(-1, h.Buf), loc)
 		}
 	}
-	h.Cursor.LastVisualX = h.Cursor.GetVisualX()
+	h.Cursor.StoreVisualX()
 	h.Relocate()
 	return true
 }
@@ -889,7 +888,7 @@ func (h *BufPane) InsertTab() bool {
 	b := h.Buf
 	indent := b.IndentString(util.IntOpt(b.Settings["tabsize"]))
 	tabBytes := len(indent)
-	bytesUntilIndent := tabBytes - (h.Cursor.GetVisualX() % tabBytes)
+	bytesUntilIndent := tabBytes - (h.Cursor.GetVisualX(false) % tabBytes)
 	b.Insert(h.Cursor.Loc, indent[:bytesUntilIndent])
 	h.Relocate()
 	return true
@@ -1238,101 +1237,183 @@ func (h *BufPane) Redo() bool {
 	return true
 }
 
+func (h *BufPane) selectLines() int {
+	if h.Cursor.HasSelection() {
+		start := h.Cursor.CurSelection[0]
+		end := h.Cursor.CurSelection[1]
+		if start.GreaterThan(end) {
+			start, end = end, start
+		}
+		if end.X == 0 {
+			end = end.Move(-1, h.Buf)
+		}
+
+		h.Cursor.Deselect(true)
+		h.Cursor.SetSelectionStart(buffer.Loc{0, start.Y})
+		h.Cursor.SetSelectionEnd(buffer.Loc{0, end.Y + 1})
+	} else {
+		h.Cursor.SelectLine()
+	}
+	return h.Cursor.CurSelection[1].Y - h.Cursor.CurSelection[0].Y
+}
+
 // Copy the selection to the system clipboard
 func (h *BufPane) Copy() bool {
-	if h.Cursor.HasSelection() {
-		h.Cursor.CopySelection(clipboard.ClipboardReg)
-		h.freshClip = true
-		InfoBar.Message("Copied selection")
-	}
-	h.Relocate()
-	return true
-}
-
-// CopyLine copies the current line to the clipboard
-func (h *BufPane) CopyLine() bool {
-	if h.Cursor.HasSelection() {
-		return false
-	}
-	origLoc := h.Cursor.Loc
-	h.Cursor.SelectLine()
-	h.Cursor.CopySelection(clipboard.ClipboardReg)
-	h.freshClip = true
-	InfoBar.Message("Copied line")
-
-	h.Cursor.Deselect(true)
-	h.Cursor.Loc = origLoc
-	h.Relocate()
-	return true
-}
-
-// CutLine cuts the current line to the clipboard
-func (h *BufPane) CutLine() bool {
-	h.Cursor.SelectLine()
 	if !h.Cursor.HasSelection() {
 		return false
 	}
-	if h.freshClip {
-		if h.Cursor.HasSelection() {
-			if clip, err := clipboard.Read(clipboard.ClipboardReg); err != nil {
-				InfoBar.Error(err)
-			} else {
-				clipboard.WriteMulti(clip+string(h.Cursor.GetSelection()), clipboard.ClipboardReg, h.Cursor.Num, h.Buf.NumCursors())
-			}
-		}
-	} else if time.Since(h.lastCutTime)/time.Second > 10*time.Second || !h.freshClip {
-		h.Copy()
+	h.Cursor.CopySelection(clipboard.ClipboardReg)
+	h.freshClip = false
+	InfoBar.Message("Copied selection")
+	h.Relocate()
+	return true
+}
+
+// CopyLine copies the current line to the clipboard. If there is a selection,
+// CopyLine copies all the lines that are (fully or partially) in the selection.
+func (h *BufPane) CopyLine() bool {
+	origLoc := h.Cursor.Loc
+	origLastVisualX := h.Cursor.LastVisualX
+	origLastWrappedVisualX := h.Cursor.LastWrappedVisualX
+	origSelection := h.Cursor.CurSelection
+
+	nlines := h.selectLines()
+	if nlines == 0 {
+		return false
 	}
-	h.freshClip = true
-	h.lastCutTime = time.Now()
-	h.Cursor.DeleteSelection()
-	h.Cursor.ResetSelection()
-	InfoBar.Message("Cut line")
+	h.Cursor.CopySelection(clipboard.ClipboardReg)
+	h.freshClip = false
+	if nlines > 1 {
+		InfoBar.Message(fmt.Sprintf("Copied %d lines", nlines))
+	} else {
+		InfoBar.Message("Copied line")
+	}
+
+	h.Cursor.Loc = origLoc
+	h.Cursor.LastVisualX = origLastVisualX
+	h.Cursor.LastWrappedVisualX = origLastWrappedVisualX
+	h.Cursor.CurSelection = origSelection
 	h.Relocate()
 	return true
 }
 
 // Cut the selection to the system clipboard
 func (h *BufPane) Cut() bool {
-	if h.Cursor.HasSelection() {
-		h.Cursor.CopySelection(clipboard.ClipboardReg)
-		h.Cursor.DeleteSelection()
-		h.Cursor.ResetSelection()
-		h.freshClip = true
-		InfoBar.Message("Cut selection")
-
-		h.Relocate()
-		return true
+	if !h.Cursor.HasSelection() {
+		return false
 	}
-	return h.CutLine()
-}
+	h.Cursor.CopySelection(clipboard.ClipboardReg)
+	h.Cursor.DeleteSelection()
+	h.Cursor.ResetSelection()
+	h.freshClip = false
+	InfoBar.Message("Cut selection")
 
-// DuplicateLine duplicates the current line or selection
-func (h *BufPane) DuplicateLine() bool {
-	var infoMessage = "Duplicated line"
-	if h.Cursor.HasSelection() {
-		infoMessage = "Duplicated selection"
-		h.Buf.Insert(h.Cursor.CurSelection[1], string(h.Cursor.GetSelection()))
-	} else {
-		h.Cursor.End()
-		h.Buf.Insert(h.Cursor.Loc, "\n"+string(h.Buf.LineBytes(h.Cursor.Y)))
-		// h.Cursor.Right()
-	}
-
-	InfoBar.Message(infoMessage)
 	h.Relocate()
 	return true
 }
 
-// DeleteLine deletes the current line
-func (h *BufPane) DeleteLine() bool {
-	h.Cursor.SelectLine()
+// CutLine cuts the current line to the clipboard. If there is a selection,
+// CutLine cuts all the lines that are (fully or partially) in the selection.
+func (h *BufPane) CutLine() bool {
+	nlines := h.selectLines()
+	if nlines == 0 {
+		return false
+	}
+	totalLines := nlines
+	if h.freshClip {
+		if clip, err := clipboard.Read(clipboard.ClipboardReg); err != nil {
+			InfoBar.Error(err)
+			return false
+		} else {
+			clipboard.WriteMulti(clip+string(h.Cursor.GetSelection()), clipboard.ClipboardReg, h.Cursor.Num, h.Buf.NumCursors())
+			totalLines = strings.Count(clip, "\n") + nlines
+		}
+	} else {
+		h.Cursor.CopySelection(clipboard.ClipboardReg)
+	}
+	h.freshClip = true
+	h.Cursor.DeleteSelection()
+	h.Cursor.ResetSelection()
+	h.Cursor.StoreVisualX()
+	if totalLines > 1 {
+		InfoBar.Message(fmt.Sprintf("Cut %d lines", totalLines))
+	} else {
+		InfoBar.Message("Cut line")
+	}
+	h.Relocate()
+	return true
+}
+
+// Duplicate the selection
+func (h *BufPane) Duplicate() bool {
 	if !h.Cursor.HasSelection() {
+		return false
+	}
+	h.Buf.Insert(h.Cursor.CurSelection[1], string(h.Cursor.GetSelection()))
+	InfoBar.Message("Duplicated selection")
+	h.Relocate()
+	return true
+}
+
+// DuplicateLine duplicates the current line. If there is a selection, DuplicateLine
+// duplicates all the lines that are (fully or partially) in the selection.
+func (h *BufPane) DuplicateLine() bool {
+	if h.Cursor.HasSelection() {
+		origLoc := h.Cursor.Loc
+		origLastVisualX := h.Cursor.LastVisualX
+		origLastWrappedVisualX := h.Cursor.LastWrappedVisualX
+		origSelection := h.Cursor.CurSelection
+
+		start := h.Cursor.CurSelection[0]
+		end := h.Cursor.CurSelection[1]
+		if start.GreaterThan(end) {
+			start, end = end, start
+		}
+		if end.X == 0 {
+			end = end.Move(-1, h.Buf)
+		}
+
+		h.Cursor.Deselect(true)
+		h.Cursor.Loc = end
+		h.Cursor.End()
+		for y := start.Y; y <= end.Y; y++ {
+			h.Buf.Insert(h.Cursor.Loc, "\n"+string(h.Buf.LineBytes(y)))
+		}
+
+		h.Cursor.Loc = origLoc
+		h.Cursor.LastVisualX = origLastVisualX
+		h.Cursor.LastWrappedVisualX = origLastWrappedVisualX
+		h.Cursor.CurSelection = origSelection
+
+		if start.Y < end.Y {
+			InfoBar.Message(fmt.Sprintf("Duplicated %d lines", end.Y-start.Y+1))
+		} else {
+			InfoBar.Message("Duplicated line")
+		}
+	} else {
+		h.Cursor.End()
+		h.Buf.Insert(h.Cursor.Loc, "\n"+string(h.Buf.LineBytes(h.Cursor.Y)))
+		InfoBar.Message("Duplicated line")
+	}
+	h.Relocate()
+	return true
+}
+
+// DeleteLine deletes the current line. If there is a selection, DeleteLine
+// deletes all the lines that are (fully or partially) in the selection.
+func (h *BufPane) DeleteLine() bool {
+	nlines := h.selectLines()
+	if nlines == 0 {
 		return false
 	}
 	h.Cursor.DeleteSelection()
 	h.Cursor.ResetSelection()
-	InfoBar.Message("Deleted line")
+	h.Cursor.StoreVisualX()
+	if nlines > 1 {
+		InfoBar.Message(fmt.Sprintf("Deleted %d lines", nlines))
+	} else {
+		InfoBar.Message("Deleted line")
+	}
 	h.Relocate()
 	return true
 }
@@ -1645,7 +1726,8 @@ func (h *BufPane) ToggleHelp() bool {
 	if h.Buf.Type == buffer.BTHelp {
 		h.Quit()
 	} else {
-		h.openHelp("help")
+		hsplit := config.GlobalSettings["helpsplit"] == "hsplit"
+		h.openHelp("help", hsplit, false)
 	}
 	return true
 }
@@ -1793,27 +1875,38 @@ func (h *BufPane) AddTab() bool {
 
 // PreviousTab switches to the previous tab in the tab list
 func (h *BufPane) PreviousTab() bool {
-	tabsLen := len(Tabs.List)
-	if tabsLen == 1 {
+	if Tabs.Active() == 0 {
 		return false
 	}
-
-	a := Tabs.Active() + tabsLen
-	Tabs.SetActive((a - 1) % tabsLen)
-
+	Tabs.SetActive(Tabs.Active() - 1)
 	return true
 }
 
 // NextTab switches to the next tab in the tab list
 func (h *BufPane) NextTab() bool {
-	tabsLen := len(Tabs.List)
-	if tabsLen == 1 {
+	if Tabs.Active() == len(Tabs.List)-1 {
 		return false
 	}
+	Tabs.SetActive(Tabs.Active() + 1)
+	return true
+}
 
-	a := Tabs.Active()
-	Tabs.SetActive((a + 1) % tabsLen)
+// FirstTab switches to the first tab in the tab list
+func (h *BufPane) FirstTab() bool {
+	if Tabs.Active() == 0 {
+		return false
+	}
+	Tabs.SetActive(0)
+	return true
+}
 
+// LastTab switches to the last tab in the tab list
+func (h *BufPane) LastTab() bool {
+	lastTabIndex := len(Tabs.List) - 1
+	if Tabs.Active() == lastTabIndex {
+		return false
+	}
+	Tabs.SetActive(lastTabIndex)
 	return true
 }
 
@@ -1848,36 +1941,38 @@ func (h *BufPane) Unsplit() bool {
 
 // NextSplit changes the view to the next split
 func (h *BufPane) NextSplit() bool {
-	if len(h.tab.Panes) == 1 {
+	if h.tab.active == len(h.tab.Panes)-1 {
 		return false
 	}
-
-	a := h.tab.active
-	if a < len(h.tab.Panes)-1 {
-		a++
-	} else {
-		a = 0
-	}
-
-	h.tab.SetActive(a)
-
+	h.tab.SetActive(h.tab.active + 1)
 	return true
 }
 
 // PreviousSplit changes the view to the previous split
 func (h *BufPane) PreviousSplit() bool {
-	if len(h.tab.Panes) == 1 {
+	if h.tab.active == 0 {
 		return false
 	}
+	h.tab.SetActive(h.tab.active - 1)
+	return true
+}
 
-	a := h.tab.active
-	if a > 0 {
-		a--
-	} else {
-		a = len(h.tab.Panes) - 1
+// FirstSplit changes the view to the first split
+func (h *BufPane) FirstSplit() bool {
+	if h.tab.active == 0 {
+		return false
 	}
-	h.tab.SetActive(a)
+	h.tab.SetActive(0)
+	return true
+}
 
+// LastSplit changes the view to the last split
+func (h *BufPane) LastSplit() bool {
+	lastPaneIdx := len(h.tab.Panes) - 1
+	if h.tab.active == lastPaneIdx {
+		return false
+	}
+	h.tab.SetActive(lastPaneIdx)
 	return true
 }
 
@@ -1966,35 +2061,20 @@ func (h *BufPane) SpawnCursorAtLoc(loc buffer.Loc) *buffer.Cursor {
 // SpawnMultiCursorUpN is not an action
 func (h *BufPane) SpawnMultiCursorUpN(n int) bool {
 	lastC := h.Buf.GetCursor(h.Buf.NumCursors() - 1)
-	var c *buffer.Cursor
-	if !h.Buf.Settings["softwrap"].(bool) {
-		if n > 0 && lastC.Y == 0 {
-			return false
-		}
-		if n < 0 && lastC.Y+1 == h.Buf.LinesNum() {
-			return false
-		}
-
-		h.Buf.DeselectCursors()
-
-		c = buffer.NewCursor(h.Buf, buffer.Loc{lastC.X, lastC.Y - n})
-		c.LastVisualX = lastC.LastVisualX
-		c.X = c.GetCharPosInLine(h.Buf.LineBytes(c.Y), c.LastVisualX)
-		c.Relocate()
-	} else {
-		vloc := h.VLocFromLoc(lastC.Loc)
-		sloc := h.Scroll(vloc.SLoc, -n)
-		if sloc == vloc.SLoc {
-			return false
-		}
-
-		h.Buf.DeselectCursors()
-
-		vloc.SLoc = sloc
-		vloc.VisualX = lastC.LastVisualX
-		c = buffer.NewCursor(h.Buf, h.LocFromVLoc(vloc))
-		c.LastVisualX = lastC.LastVisualX
+	if n > 0 && lastC.Y == 0 {
+		return false
 	}
+	if n < 0 && lastC.Y+1 == h.Buf.LinesNum() {
+		return false
+	}
+
+	h.Buf.DeselectCursors()
+
+	c := buffer.NewCursor(h.Buf, buffer.Loc{lastC.X, lastC.Y - n})
+	c.LastVisualX = lastC.LastVisualX
+	c.LastWrappedVisualX = lastC.LastWrappedVisualX
+	c.X = c.GetCharPosInLine(h.Buf.LineBytes(c.Y), c.LastVisualX)
+	c.Relocate()
 
 	h.Buf.AddCursor(c)
 	h.Buf.SetCurCursor(h.Buf.NumCursors() - 1)
@@ -2076,14 +2156,16 @@ func (h *BufPane) MouseMultiCursor(e *tcell.EventMouse) bool {
 	return true
 }
 
-// SkipMultiCursor moves the current multiple cursor to the next available position
-func (h *BufPane) SkipMultiCursor() bool {
+func (h *BufPane) skipMultiCursor(forward bool) bool {
 	lastC := h.Buf.GetCursor(h.Buf.NumCursors() - 1)
 	if !lastC.HasSelection() {
 		return false
 	}
 	sel := lastC.GetSelection()
 	searchStart := lastC.CurSelection[1]
+	if !forward {
+		searchStart = lastC.CurSelection[0]
+	}
 
 	search := string(sel)
 	search = regexp.QuoteMeta(search)
@@ -2091,7 +2173,7 @@ func (h *BufPane) SkipMultiCursor() bool {
 		search = "\\b" + search + "\\b"
 	}
 
-	match, found, err := h.Buf.FindNext(search, h.Buf.Start(), h.Buf.End(), searchStart, true, true)
+	match, found, err := h.Buf.FindNext(search, h.Buf.Start(), h.Buf.End(), searchStart, forward, true)
 	if err != nil {
 		InfoBar.Error(err)
 	}
@@ -2109,6 +2191,16 @@ func (h *BufPane) SkipMultiCursor() bool {
 	}
 	h.Relocate()
 	return true
+}
+
+// SkipMultiCursor moves the current multiple cursor to the next available position
+func (h *BufPane) SkipMultiCursor() bool {
+	return h.skipMultiCursor(true)
+}
+
+// SkipMultiCursorBack moves the current multiple cursor to the previous available position
+func (h *BufPane) SkipMultiCursorBack() bool {
+	return h.skipMultiCursor(false)
 }
 
 // RemoveMultiCursor removes the latest multiple cursor
