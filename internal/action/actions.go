@@ -46,6 +46,14 @@ func (h *BufPane) ScrollAdjust() {
 	h.SetView(v)
 }
 
+// ScrollReachedEnd returns true if the view is at the end of the buffer,
+// i.e. the last line of the buffer is in the view.
+func (h *BufPane) ScrollReachedEnd() bool {
+	v := h.GetView()
+	end := h.SLocFromLoc(h.Buf.End())
+	return h.Diff(v.StartLine, end) < h.BufView().Height
+}
+
 // MousePress is the event that should happen when a normal click happens
 // This is almost always bound to left click
 func (h *BufPane) MousePress(e *tcell.EventMouse) bool {
@@ -254,8 +262,13 @@ func (h *BufPane) CursorUp() bool {
 
 // CursorDown moves the cursor down
 func (h *BufPane) CursorDown() bool {
+	selectionEndNewline := h.Cursor.HasSelection() && h.Cursor.CurSelection[1].X == 0
 	h.Cursor.Deselect(false)
-	h.MoveCursorDown(1)
+	if selectionEndNewline {
+		h.Cursor.Start()
+	} else {
+		h.MoveCursorDown(1)
+	}
 	h.Relocate()
 	return true
 }
@@ -289,7 +302,6 @@ func (h *BufPane) CursorLeft() bool {
 func (h *BufPane) CursorRight() bool {
 	if h.Cursor.HasSelection() {
 		h.Cursor.Deselect(false)
-		h.Cursor.Right()
 	} else {
 		tabstospaces := h.Buf.Settings["tabstospaces"].(bool)
 		tabmovement := h.Buf.Settings["tabmovement"].(bool)
@@ -1707,7 +1719,7 @@ func (h *BufPane) SelectPageDown() bool {
 	}
 	h.MoveCursorDown(scrollAmount)
 	h.Cursor.SelectTo(h.Cursor.Loc)
-	if h.Cursor.Num == 0 {
+	if h.Cursor.Num == 0 && !h.ScrollReachedEnd() {
 		h.ScrollDown(scrollAmount)
 		h.ScrollAdjust()
 	}
@@ -1732,13 +1744,20 @@ func (h *BufPane) CursorPageUp() bool {
 // CursorPageDown places the cursor a page down,
 // moving the view to keep cursor at the same relative position in the view
 func (h *BufPane) CursorPageDown() bool {
+	selectionEndNewline := h.Cursor.HasSelection() && h.Cursor.CurSelection[1].X == 0
 	h.Cursor.Deselect(false)
 	pageOverlap := int(h.Buf.Settings["pageoverlap"].(float64))
 	scrollAmount := h.BufView().Height - pageOverlap
+	if selectionEndNewline {
+		scrollAmount--
+	}
 	h.MoveCursorDown(scrollAmount)
-	if h.Cursor.Num == 0 {
+	if h.Cursor.Num == 0 && !h.ScrollReachedEnd() {
 		h.ScrollDown(scrollAmount)
 		h.ScrollAdjust()
+	}
+	if selectionEndNewline {
+		h.Cursor.Start()
 	}
 	h.Relocate()
 	return true
@@ -1875,6 +1894,13 @@ func (h *BufPane) ForceQuit() bool {
 // Quit this will close the current tab or view that is open
 func (h *BufPane) Quit() bool {
 	if h.Buf.Modified() {
+		for _, b := range buffer.OpenBuffers {
+			if b != h.Buf && b.SharedBuffer == h.Buf.SharedBuffer {
+				h.ForceQuit()
+				return true
+			}
+		}
+
 		if config.GlobalSettings["autosave"].(float64) > 0 {
 			// autosave on means we automatically save when quitting
 			h.SaveCB("Quit", func() {
