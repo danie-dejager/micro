@@ -1,6 +1,6 @@
 Name:           micro
 Version:        2.0.15
-Release:        2%{?dist}
+Release:        3%{?dist}
 Summary:        A modern and intuitive terminal-based text editor
 
 License:        MIT and ASL 2.0
@@ -44,6 +44,7 @@ install -m 0755 -vp micro 		     %{buildroot}%{_bindir}/
 %{_bindir}/*
  
 %changelog
+* Wed Jun 10 2026 - Danie de Jager - 2.0.15-3
 * Fri Jan 2 2026 - Danie de Jager - 2.0.15-2
 * Fri Jan 2 2026 - Danie de Jager - 2.0.15-1
 * Mon Nov 11 2025 - Danie de Jager - 2.0.14-6
