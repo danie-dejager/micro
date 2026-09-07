@@ -25,17 +25,29 @@ func (b *Buffer) GetSuggestions() {
 
 // Autocomplete starts the autocomplete process
 func (b *Buffer) Autocomplete(c Completer) bool {
+	return b.AutocompleteCB(c, nil)
+}
+
+func (b *Buffer) AutocompleteCB(c Completer, checkCB func(*Cursor) bool) bool {
+	if checkCB != nil && !checkCB(b.GetActiveCursor()) {
+		return false
+	}
 	b.Completions, b.Suggestions = c(b)
+
 	if len(b.Completions) != len(b.Suggestions) || len(b.Completions) == 0 {
 		return false
 	}
 	b.CurSuggestion = -1
-	b.CycleAutocomplete(true)
+	b.CycleAutocompleteCB(true, checkCB)
 	return true
 }
 
 // CycleAutocomplete moves to the next suggestion
 func (b *Buffer) CycleAutocomplete(forward bool) {
+	b.CycleAutocompleteCB(forward, nil)
+}
+
+func (b *Buffer) CycleAutocompleteCB(forward bool, checkCB func(*Cursor) bool) {
 	prevSuggestion := b.CurSuggestion
 
 	if forward {
@@ -49,23 +61,43 @@ func (b *Buffer) CycleAutocomplete(forward bool) {
 		b.CurSuggestion = len(b.Suggestions) - 1
 	}
 
-	c := b.GetActiveCursor()
-	start := c.Loc
-	end := c.Loc
-	if prevSuggestion < len(b.Suggestions) && prevSuggestion >= 0 {
-		start = end.Move(-util.CharacterCountInString(b.Completions[prevSuggestion]), b)
+	tmpWord, _ := b.GetWord()
+	activeWord := make([]byte, len(tmpWord))
+	copy(activeWord, tmpWord)
+	for _, c := range b.cursors {
+		if checkCB != nil && !checkCB(c) {
+			continue
+		}
+
+		word, _ := c.GetWord()
+		if !bytes.Equal(word, activeWord) {
+			continue
+		}
+
+		c.autocomplete(prevSuggestion)
 	}
 
-	b.Replace(start, end, b.Completions[b.CurSuggestion])
 	if len(b.Suggestions) > 1 {
 		b.HasSuggestions = true
 	}
 }
 
+func (c *Cursor) autocomplete(prevSuggestion int) {
+	b := c.buf
+	start := c.Loc
+	end := c.Loc
+
+	if prevSuggestion < len(b.Suggestions) && prevSuggestion >= 0 {
+		start = end.Move(-util.CharacterCountInString(b.Completions[prevSuggestion]), b)
+	}
+
+	b.Replace(start, end, b.Completions[b.CurSuggestion])
+}
+
 // GetWord gets the most recent word separated by any separator
 // (whitespace, punctuation, any non alphanumeric character)
-func (b *Buffer) GetWord() ([]byte, int) {
-	c := b.GetActiveCursor()
+func (c *Cursor) GetWord() ([]byte, int) {
+	b := c.buf
 	l := b.LineBytes(c.Y)
 	l = util.SliceStart(l, c.X)
 
@@ -80,6 +112,10 @@ func (b *Buffer) GetWord() ([]byte, int) {
 	args := bytes.FieldsFunc(l, util.IsNonWordChar)
 	input := args[len(args)-1]
 	return input, c.X - util.CharacterCount(input)
+}
+
+func (b *Buffer) GetWord() ([]byte, int) {
+	return b.GetActiveCursor().GetWord()
 }
 
 // GetArg gets the most recent word (separated by ' ' only)
@@ -153,7 +189,7 @@ func FileComplete(b *Buffer) ([]string, []string) {
 // BufferComplete autocompletes based on previous words in the buffer
 func BufferComplete(b *Buffer) ([]string, []string) {
 	c := b.GetActiveCursor()
-	input, argstart := b.GetWord()
+	input, argstart := c.GetWord()
 
 	if argstart == -1 {
 		return []string{}, []string{}

@@ -903,6 +903,20 @@ func (h *BufPane) OutdentSelection() bool {
 	return false
 }
 
+func canAutocomplete(c *buffer.Cursor) bool {
+	if c.X == 0 {
+		return false
+	}
+
+	r := c.RuneUnder(c.X)
+	prev := c.RuneUnder(c.X - 1)
+	if !util.IsAutocomplete(prev) || util.IsWordChar(r) {
+		// don't autocomplete if cursor is within a word
+		return false
+	}
+	return true
+}
+
 // Autocomplete cycles the suggestions and performs autocompletion if there are suggestions
 func (h *BufPane) Autocomplete() bool {
 	b := h.Buf
@@ -916,17 +930,7 @@ func (h *BufPane) Autocomplete() bool {
 		return true
 	}
 
-	if h.Cursor.X == 0 {
-		return false
-	}
-	r := h.Cursor.RuneUnder(h.Cursor.X)
-	prev := h.Cursor.RuneUnder(h.Cursor.X - 1)
-	if !util.IsAutocomplete(prev) || util.IsWordChar(r) {
-		// don't autocomplete if cursor is within a word
-		return false
-	}
-
-	return b.Autocomplete(buffer.BufferComplete)
+	return b.AutocompleteCB(buffer.BufferComplete, canAutocomplete)
 }
 
 // CycleAutocompleteBack cycles back in the autocomplete suggestion list
@@ -936,7 +940,7 @@ func (h *BufPane) CycleAutocompleteBack() bool {
 	}
 
 	if h.Buf.HasSuggestions {
-		h.Buf.CycleAutocomplete(false)
+		h.Buf.CycleAutocompleteCB(false, canAutocomplete)
 		return true
 	}
 	return false
